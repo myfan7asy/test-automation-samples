@@ -1,0 +1,9 @@
+# api-tests files
+test-automation/api-tests/node_modules
+test-automation/api-tests/.env
+.sf/config.json
+
+# e2e-tests files
+test-automation/e2e-tests/node_modules
+test-automation/e2e-tests/cypress/videos
+

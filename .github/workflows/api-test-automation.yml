@@ -1,0 +1,72 @@
+name: Execute API tests
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    timeout-minutes: 60
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v2
+        with:
+          node-version: '16.x'
+
+      - name: Install all required dependepcies
+        run: npm install
+        working-directory: ./test-automation/api-tests
+
+      - name: Install Salesforce CLI
+        run: npm install sfdx-cli --global
+
+      - name: Get Salesforce environment name
+        id: salesforce-environment-found
+        env:
+          SALESFORCE_ENVIRONMENT_NAME: $(echo ${GITHUB_REF#refs/heads/} | tr / -)
+        shell: bash
+        run: |
+          if [[ ${{ env.SALESFORCE_ENVIRONMENT_NAME }} =~ feature|Feature ]]
+          then
+            echo "SALESFORCE_ENVIRONMENT_NAME=$(echo TEST)" >> $GITHUB_ENV
+          elif [[ ${{ env.SALESFORCE_ENVIRONMENT_NAME }} == master ]]
+          then
+            echo "SALESFORCE_ENVIRONMENT_NAME=$(echo PROD)" >> $GITHUB_ENV
+          else
+            echo "SALESFORCE_ENVIRONMENT_NAME=$(echo ${{ env.SALESFORCE_ENVIRONMENT_NAME }})" >> $GITHUB_ENV
+          fi;
+
+      - name: Fail job if environment name does not equals DEV, PREPROD or PROD
+        run: |
+          if [[ ! ${{ env.SALESFORCE_ENVIRONMENT_NAME }} =~ DEV|PREPROD|PROD ]]; 
+          then 
+            exit 1
+          fi
+
+      - name: Get auth token secret name
+        shell: bash
+        run: echo "AUTH_TOKEN_SECRET_NAME=$(echo SALESFORCE_AUTH_TOKEN_INTEGRATION_USER_$(echo ${{ env.SALESFORCE_ENVIRONMENT_NAME }}))" >> $GITHUB_ENV
+
+      - name: Populate auth file with secret
+        shell: bash
+        run: echo ${{ secrets[env.AUTH_TOKEN_SECRET_NAME] }} > ./SFDX_URL.txt
+
+      - name: Authenticate against Salesforce org
+        run: sfdx force:auth:sfdxurl:store --sfdxurlfile=./SFDX_URL.txt --setalias=ORG
+
+      - name: Get the access token for the target org
+        env:
+          SALESFORCE_AUTH_TOKEN: $(sfdx force:org:display -u ORG | grep -E 'Access Token' | awk '{print $3}')
+        shell: bash
+        run: |
+          echo "::add-mask::${{ env.SALESFORCE_AUTH_TOKEN }}"
+          echo "SALESFORCE_AUTH_TOKEN=$(echo ${{ env.SALESFORCE_AUTH_TOKEN }})" >> $GITHUB_ENV
+
+      - name: Run all tests from 'test' folder
+        env: 
+          sales_env_name: ${{ env.SALESFORCE_ENVIRONMENT_NAME }}
+        run: npm test  --last=${{ env.SALESFORCE_AUTH_TOKEN }}
+        working-directory: ./test-automation/api-tests
